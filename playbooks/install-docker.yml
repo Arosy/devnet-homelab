@@ -45,19 +45,16 @@
     become: true
     become_method: sudo
     command: chmod a+r /etc/apt/keyrings/docker.asc
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: setup docker repository
     become: true
     become_method: sudo
     copy: content="deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu   oracular stable" dest=/etc/apt/sources.list.d/docker.list
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: update package repository
     become: true
     become_method: sudo
     command: apt update
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure docker-ce is at the latest version
     become: true
@@ -65,7 +62,6 @@
     ansible.builtin.apt:
       name: docker-ce
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure docker-ce-cli is at the latest version
     become: true
@@ -73,7 +69,6 @@
     ansible.builtin.apt:
       name: docker-ce-cli
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure containerd.io is at the latest version
     become: true
@@ -81,7 +76,6 @@
     ansible.builtin.apt:
       name: containerd.io
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure docker-buildx-plugin is at the latest version
     become: true
@@ -89,7 +83,6 @@
     ansible.builtin.apt:
       name: docker-buildx-plugin
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure docker-compose-plugin is at the latest version
     become: true
@@ -97,24 +90,20 @@
     ansible.builtin.apt:
       name: docker-compose-plugin
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "add docker group"
     become: true
     become_method: sudo
     command: groupadd docker
     ignore_errors: True
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "add current user to docker group"
     become: true
     become_method: sudo
     command: "usermod -aG docker {{ssh_user}}"
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "create 'home' network for docker"
     become: true
     become_method: sudo
     command: docker network create home
     ignore_errors: True
-    when: install_docker == 1
