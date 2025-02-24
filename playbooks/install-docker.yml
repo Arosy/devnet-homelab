@@ -10,8 +10,7 @@
       name: "*"
       state: latest
       update_cache: yes
-      cache_valid_time: 30 #One day 
-    when: install_docker == 1
+      cache_valid_time: 30 #One day
 #---------------------------------------------------------------------------------------------
   - name: ensure 'ca-certificates' is at the latest version
     become: true
@@ -19,7 +18,6 @@
     apt:
       name: ca-certificates
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: ensure 'curl' is at the latest version
     become: true
@@ -27,19 +25,16 @@
     apt:
       name: curl
       state: latest
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "install /etc/apt/keyrings"
     become: true
     become_method: sudo
     command: install -m 0755 -d /etc/apt/keyrings
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "downloading docker gpg key to '/etc/apt/keyrings/docker.asc'"
     become: true
     become_method: sudo
     command: curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
-    when: install_docker == 1
 #---------------------------------------------------------------------------------------------
   - name: "setting permission '/etc/apt/keyrings/docker.asc'"
     become: true
