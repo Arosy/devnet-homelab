@@ -16,5 +16,4 @@ ansible-playbook --inventory-file ../inv/$1 install-docker.yml \
 											create-stack-vaultwarden.yml \
 											install-nmap.yml \
 											install-zerotier.yml \
-											config-firewall.yml \
                                             --ask-pass --ask-become-pass
