@@ -1,0 +1,53 @@
+#-------------------------
+[all]
+localhost
+#-------------------------
+## the block below contains various configurable variables for the setup procedure,
+## to find out whats possible and how to tweak each configuration, please check the
+## documentation located near the settings itself or its block description.
+#-------------------------
+[all:vars]
+#-------------------------
+## the most generic settings which probably won't require much of an introduction, but
+## they are still very important and should therefore be at the top for easy access.
+#-------------------------
+## the remote ssh user which is used for authentification and determining the home location.
+ssh_user="arosy"
+
+#-------------------------
+## PORTAINER
+#-------------------------
+portainer_host="http://{{ansible_host}}:9000"
+portainer_user="admin"
+portainer_pass="some!36#very$§strong$9!pASS"
+
+#-------------------------
+## PIHOLE
+#-------------------------
+pihole_pass=""                                  ## can be empty
+pihole_port=8089
+pihole_img="2024.07.0"
+
+#-------------------------
+## JDOWNLOADER2
+#-------------------------
+jd2_vnc_pass=""                                 ## can be empty
+
+#-------------------------
+## VAULTWARDEN
+#-------------------------
+vault_pass="test1234"
+
+#-------------------------
+## SSL CERTIFICATE
+#-------------------------
+ssl_country="DE"
+ssl_location="Root"
+ssl_organization="dev.Net Homelabs"
+ssl_domain="*.home"
+
+#-------------------------
+## MISC
+#-------------------------
+DATA_DIRECTORY="/home/{{ssh_user}}/docker"
+timezone="Europe/Amsterdam"

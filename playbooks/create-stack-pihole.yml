@@ -1,0 +1,158 @@
+- name: create portainer stack for pihole
+  hosts: all
+  remote_user: "{{ssh_user}}"
+  gather_facts: no
+  vars:
+    stack_name: "pihole"
+  tasks:
+#---------------------------------------------------------------------------------------------
+  - name: "authenticate with portainer api"
+    uri:
+      url: "{{portainer_host}}/api/auth"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      body_format: json
+      body:
+        username: "{{ portainer_user }}"
+        password: "{{ portainer_pass }}"
+    register: auth_response
+    changed_when: false
+    ignore_errors: true
+#---------------------------------------------------------------------------------------------
+  - name: "check authentication response"
+    fail:
+      msg: "failed to authenticate with portainer api"
+    when: "auth_response.status != 200"
+#---------------------------------------------------------------------------------------------
+  - name: "get jwt token from authentication response"
+    set_fact:
+      jwt_token: "{{auth_response.json.jwt}}"
+    when: auth_response.status == 200
+#---------------------------------------------------------------------------------------------
+  - name: "get endpoints from portainer"
+    uri:
+      url: "{{portainer_host}}/api/endpoints"
+      method: GET
+      headers:
+        Authorization: "Bearer {{jwt_token}}"
+    register: get_endpoints
+    when: jwt_token is defined
+#---------------------------------------------------------------------------------------------
+  - name: 'checking if portainer is initialized correctly'
+    fail:
+      msg: "portainer seems to be freshly installed, please login manually once at: http://{{ansible_host}}:9000 and after that execute this script again."
+    when: jwt_token is defined and not get_endpoints.json is search("Id")
+#---------------------------------------------------------------------------------------------
+  - name: "get stack information from portainer"
+    uri:
+      url: "{{portainer_host}}/api/stacks"
+      method: GET
+      headers:
+        Authorization: "Bearer {{jwt_token}}"
+    register: get_stack_response
+    when: jwt_token is defined
+#---------------------------------------------------------------------------------------------
+  - name: "check if the stack exists"
+    set_fact:
+      stack_not_exists: "{{response_data | json_query('[?Name == `'+ stack_name +'`]') | length <= 0}}"
+    vars:
+      response_data: "{{get_stack_response.json}}"
+#---------------------------------------------------------------------------------------------
+  - name: "setup folder for container data"
+    ansible.builtin.file:
+      path: "{{DATA_DIRECTORY}}/{{stack_name}}"
+      state: directory
+      owner: "{{ssh_user}}"
+      group: "{{ssh_user}}"
+      mode: '0755'
+    when: jwt_token is defined and stack_not_exists
+    ignore_errors: true
+#---------------------------------------------------------------------------------------------
+  - name: checking if '/etc/systemd/resolved.conf' exists
+    stat:
+      path: "/etc/systemd/resolved.conf"
+    register: has_resolved_file
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: disable local dns stub listener
+    become: true
+    become_method: sudo
+    replace:
+      path: /etc/systemd/resolved.conf
+      regexp: 'DNSStubListener=yes'
+      replace: 'DNSStubListener=no'
+    when: stack_not_exists and has_resolved_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: uncomment entry
+    become: true
+    become_method: sudo
+    replace:
+      path: /etc/systemd/resolved.conf
+      regexp: '#DNSStubListener=no'
+      replace: 'DNSStubListener=no'
+    when: stack_not_exists and has_resolved_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: checking if '/etc/resolv.conf' exists
+    stat:
+      path: "/etc/resolv.conf"
+    register: has_resolv_file
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: remove '/etc/resolv.conf'
+    become: true
+    become_method: sudo
+    command: "rm /etc/resolv.conf"
+    when: stack_not_exists and has_resolv_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: "link resolv conf: '/run/systemd/resolve/resolv.conf' to '/etc/resolv.conf'"
+    become: true
+    become_method: sudo
+    command: "ln -s /run/systemd/resolve/resolv.conf /etc/resolv.conf"
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "restart systemd-resolved"
+    become: true
+    become_method: sudo
+    command: "systemctl restart systemd-resolved"
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "create a stack in portainer"
+    uri:
+      url: "{{portainer_host}}/api/stacks/create/standalone/string?endpointId={{get_endpoints.json[0].Id}}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{jwt_token}}"
+      body_format: json
+      body:
+        name: "{{stack_name}}"
+        fromAppTemplate: false
+        StackFileContent: |
+          version: '3'
+          networks:
+            home:
+              external: true
+          services:
+            {{stack_name}}:
+              restart: unless-stopped
+              container_name: {{stack_name}}
+              image: pihole/pihole:{{pihole_img}}
+              ports:
+                - 53:53/udp
+                - 53:53/tcp
+              environment:
+                TZ: '{{timezone}}'
+                WEBPASSWORD: '{{pihole_pass}}'
+              volumes:
+                - '{{DATA_DIRECTORY}}/{{stack_name}}/data:/etc/pihole'
+                - '{{DATA_DIRECTORY}}/{{stack_name}}/dnsmasq.d:/etc/dnsmasq.d'
+              networks:
+                - home
+              labels:
+                - traefik.http.routers.{{stack_name}}.entrypoints=web
+                - traefik.http.routers.{{stack_name}}.rule=Host(`{{stack_name}}.home`)
+                - traefik.http.services.{{stack_name}}.loadbalancer.server.port=80
+    register: create_stack_response
+    when: jwt_token is defined and stack_not_exists
+#---------------------------------------------------------------------------------------------

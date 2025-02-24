@@ -1,0 +1,189 @@
+- name: create portainer stack for traefik
+  hosts: all
+  remote_user: "{{ssh_user}}"
+  gather_facts: no
+  vars:
+    stack_name: "proxy"
+  tasks:
+#---------------------------------------------------------------------------------------------
+  - name: "authenticate with portainer api"
+    uri:
+      url: "{{portainer_host}}/api/auth"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+      body_format: json
+      body:
+        username: "{{ portainer_user }}"
+        password: "{{ portainer_pass }}"
+    register: auth_response
+    changed_when: false
+    ignore_errors: true
+#---------------------------------------------------------------------------------------------
+  - name: "check authentication response"
+    fail:
+      msg: "failed to authenticate with portainer api"
+    when: "auth_response.status != 200"
+#---------------------------------------------------------------------------------------------
+  - name: "get jwt token from authentication response"
+    set_fact:
+      jwt_token: "{{auth_response.json.jwt}}"
+    when: auth_response.status == 200
+#---------------------------------------------------------------------------------------------
+  - name: "get endpoints from portainer"
+    uri:
+      url: "{{portainer_host}}/api/endpoints"
+      method: GET
+      headers:
+        Authorization: "Bearer {{jwt_token}}"
+    register: get_endpoints
+    when: jwt_token is defined
+#---------------------------------------------------------------------------------------------
+  - name: 'checking if portainer is initialized correctly'
+    fail:
+      msg: "portainer seems to be freshly installed, please login manually once at: http://{{ansible_host}}:9000 and after that execute this script again."
+    when: jwt_token is defined and not get_endpoints.json is search("Id")
+#---------------------------------------------------------------------------------------------
+  - name: "get stack information from portainer"
+    uri:
+      url: "{{portainer_host}}/api/stacks"
+      method: GET
+      headers:
+        Authorization: "Bearer {{jwt_token}}"
+    register: get_stack_response
+    when: jwt_token is defined
+#---------------------------------------------------------------------------------------------
+  - name: "check if the stack exists"
+    set_fact:
+      stack_not_exists: "{{response_data | json_query('[?Name == `'+ stack_name +'`]') | length <= 0}}"
+    vars:
+      response_data: "{{get_stack_response.json}}"
+#---------------------------------------------------------------------------------------------
+  - name: "setup folder for container data"
+    file:
+      path: "{{DATA_DIRECTORY}}/{{stack_name}}"
+      state: directory
+      owner: "{{ssh_user}}"
+      group: "{{ssh_user}}"
+      mode: '0755'
+    when: jwt_token is defined and stack_not_exists
+    ignore_errors: true
+#---------------------------------------------------------------------------------------------
+  - name: "setup folder for ssl certificates"
+    file:
+      path: "{{DATA_DIRECTORY}}/ssl"
+      state: directory
+      owner: "{{ssh_user}}"
+      group: "{{ssh_user}}"
+      mode: '0755'
+    when: jwt_token is defined and stack_not_exists
+    ignore_errors: true
+#---------------------------------------------------------------------------------------------
+  - name: "create cert.key and cert.crt"
+    command: "openssl req -x509 -nodes -days 365 -newkey rsa:2048 -subj \"/C={{ssl_country}}/ST=Denial/L={{ssl_location}}/O={{ssl_organization}}/CN={{ssl_domain}}\" -keyout {{DATA_DIRECTORY}}/ssl/cert.key -out {{DATA_DIRECTORY}}/ssl/cert.crt"
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "create key.pem based on cert.key"
+    command: "openssl rsa -in cert.key -out key.pem"
+    args:
+      chdir: "{{DATA_DIRECTORY}}/ssl"
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "create cert.pem based on cert.crt"
+    command: "openssl x509 -in cert.crt -out cert.pem -outform PEM"
+    args:
+      chdir: "{{DATA_DIRECTORY}}/ssl"
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: checking if '{{DATA_DIRECTORY}}/{{stack_name}}/config.yml' exists
+    stat:
+      path: "{{DATA_DIRECTORY}}/{{stack_name}}/config.yml"
+    register: has_proxy_config
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "create cert.pem based on cert.crt"
+    command: "touch {{DATA_DIRECTORY}}/{{stack_name}}/config.yml"
+    when: stack_not_exists and not has_proxy_config.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: write traefik default config
+    blockinfile:
+      state: present
+      insertafter: EOF
+      dest: "{{DATA_DIRECTORY}}/{{stack_name}}/config.yml"
+      marker: "#<!-- traefik default -->"
+      content: |
+        tls:
+          certificates:
+            - certFile: /ssl/cert.crt
+              keyFile: /ssl/cert.key
+        #http:
+        #  services:
+        #    my_service:
+        #      loadBalancer:
+        #        servers:
+        #          - url: "http://example.com:12345"
+        #        passHostHeader: true
+        #  routers:
+        #    my_route:
+        #      rule: "Host(`example.com`)"
+        #      service: my_service
+    when: stack_not_exists
+#---------------------------------------------------------------------------------------------
+  - name: "create a stack in portainer"
+    uri:
+      url: "{{portainer_host}}/api/stacks/create/standalone/string?endpointId={{get_endpoints.json[0].Id}}"
+      method: POST
+      headers:
+        Content-Type: "application/json"
+        Authorization: "Bearer {{jwt_token}}"
+      body_format: json
+      body:
+        name: "{{stack_name}}"
+        fromAppTemplate: false
+        StackFileContent: |
+          version: '3'
+          networks:
+            home:
+              external: true
+          services:
+            {{stack_name}}:
+              # The official v3 Traefik docker image
+              image: traefik:v3.3
+              container_name: {{stack_name}}
+              # Enables the web UI and tells Traefik to listen to docker
+              command:
+                - --api.insecure=true
+                - --providers.docker
+                - --entrypoints.web.address=:80
+                - --entrypoints.websecure.address=:443
+                - --providers.file.directory=/etc/traefik/dynamic_conf
+              ports:
+                # The HTTP port
+                - "80:80"
+                - "443:443"
+              volumes:
+                # So that Traefik can listen to the Docker events
+                - /var/run/docker.sock:/var/run/docker.sock
+                - {{DATA_DIRECTORY}}/ssl:/ssl
+                - {{DATA_DIRECTORY}}/{{stack_name}}/config.yml:/etc/traefik/dynamic_conf/conf.yml:ro
+              networks:
+                - home
+              labels:
+                - homepage.group=Networking
+                - homepage.name=Traefik
+                - homepage.icon=traefik.png
+                - homepage.href=http://{{stack_name}}.home
+                - homepage.description=Reverse Proxy
+                - traefik.http.routers.{{stack_name}}.entrypoints=web
+                - traefik.http.routers.{{stack_name}}.rule=Host(`{{stack_name}}.home`)
+                - traefik.http.services.{{stack_name}}.loadbalancer.server.port=8080
+            whoami:
+              # A container that exposes an API to show its IP address
+              image: traefik/whoami
+              labels:
+                - "traefik.http.routers.whoami.rule=Host(`whoami.docker.localhost`)"
+              networks:
+                - home
+    register: create_stack_response
+    when: jwt_token is defined and stack_not_exists
+#---------------------------------------------------------------------------------------------

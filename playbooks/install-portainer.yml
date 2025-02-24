@@ -1,0 +1,65 @@
+- name: install portainer
+  hosts: all
+  remote_user: "{{ssh_user}}"
+  gather_facts: no
+  tasks:
+#---------------------------------------------------------------------------------------------
+  - name: "create portainer folder: {{DATA_DIRECTORY}}/portainer"
+    file:
+      path: "{{DATA_DIRECTORY}}/portainer"
+      state: directory
+      owner: "{{ ssh_user }}"
+      group: "{{ ssh_user }}"
+      mode: '0755'
+#---------------------------------------------------------------------------------------------
+  - name: checking if '"{{DATA_DIRECTORY}}/docker-compose.yml"' exists
+    stat:
+      path: "{{DATA_DIRECTORY}}/docker-compose.yml"
+    register: has_compose_file
+#---------------------------------------------------------------------------------------------
+  - name: creating '"{{DATA_DIRECTORY}}/docker-compose.yml"'
+    command: "touch {{DATA_DIRECTORY}}/docker-compose.yml"
+    when: not has_compose_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: write portainer start command to compose
+    blockinfile:
+      state: present
+      insertafter: EOF
+      dest: "{{DATA_DIRECTORY}}/docker-compose.yml"
+      marker: "#<!-- portainer -->"
+      content: |
+        services:
+          portainer:
+            restart: unless-stopped
+            container_name: portainer
+            image: portainer/portainer-ce:latest
+            environment:
+              - TZ=Europe/Amsterdam
+            security_opt:
+              - no-new-privileges:true
+            volumes:
+              - /var/run/docker.sock:/var/run/docker.sock:ro
+              - /etc/localtime:/etc/localtime:ro
+              - "{{DATA_DIRECTORY}}/portainer:/data"
+            ports:
+              - 9000:9000
+    when: not has_compose_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: start portainer container
+    become: true
+    become_method: sudo
+    command: "docker compose up -d"
+    args:
+      chdir: "{{DATA_DIRECTORY}}"
+    when: not has_compose_file.stat.exists
+#---------------------------------------------------------------------------------------------
+  - name: create admin account in portainer
+    uri:
+      url: "{{portainer_host}}/api/users/admin/init"
+      method: POST
+      body_format: json
+      headers:
+        Content-Type: "application/json"
+      body: '{"Username": "{{portainer_user}}", "Password": "{{portainer_pass}}", "Role": 1}'
+      status_code: 200
+    when: not has_compose_file.stat.exists
